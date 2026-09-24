@@ -7,9 +7,11 @@ mirrors) these schemas so that the payloads it sends match what FastAPI expects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+RunStatus = Literal["converged", "max_epochs", "diverged"]
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +28,7 @@ class DatasetCreate(BaseModel):
 
 
 class Dataset(BaseModel):
-    """A dataset row as stored in Supabase."""
+    """A dataset row as stored in Supabase (metadata only)."""
 
     id: int
     name: str
@@ -37,23 +39,36 @@ class Dataset(BaseModel):
     created_at: datetime
 
 
+class DatasetWithPoints(Dataset):
+    """Response for GET /datasets/{id}: metadata plus the raw points, used by
+    the UI for the fitted-line overlay (the UI's anon key cannot read datasets)."""
+
+    xs: List[float]
+    ys: List[float]
+
+
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 class TrainRequest(BaseModel):
-    """Request body for POST /train."""
+    """Request body for POST /train and POST /train/stream."""
 
     dataset_id: int
     lr: float = Field(0.01, gt=0.0, description="Learning rate for gradient descent.")
     batch_size: int = Field(32, ge=1)
-    epochs: int = Field(100, ge=1, le=5000)
+    epochs: int = Field(100, ge=1, le=5000, description="Maximum epoch budget.")
     test_size: float = Field(0.2, gt=0.0, lt=1.0, description="Held-out fraction.")
+    early_stopping: bool = Field(True, description="Stop when the training loss plateaus.")
+    patience: int = Field(20, ge=1, le=1000, description="Epochs without improvement before stopping.")
+    min_delta: float = Field(1e-4, ge=0.0, lt=1.0, description="Relative loss improvement that counts.")
 
 
 class Metrics(BaseModel):
-    mse: float
-    mae: float
-    r2: float
+    """Held-out metrics. None when a diverged run produced NaN/inf."""
+
+    mse: Optional[float]
+    mae: Optional[float]
+    r2: Optional[float]
 
 
 class Run(BaseModel):
@@ -64,17 +79,34 @@ class Run(BaseModel):
     lr: float
     batch_size: int
     epochs: int
-    mse: float
-    mae: float
-    r2: float
+    status: RunStatus
+    epochs_run: Optional[int] = None
+    patience: Optional[int] = None
+    min_delta: Optional[float] = None
+    mse: Optional[float]
+    mae: Optional[float]
+    r2: Optional[float]
     weights_json: dict
+    loss_history: List[Optional[float]] = Field(default_factory=list)
     created_at: datetime
 
 
 class TrainResponse(BaseModel):
+    """Final result of a training job (also the last SSE event of /train/stream)."""
+
     run_id: int
+    status: RunStatus
+    epochs_run: int
     metrics: Metrics
     weights: dict = Field(..., description="Fitted {'slope': .., 'intercept': ..}.")
+    loss_history: List[Optional[float]]
+
+
+class TrainEpochEvent(BaseModel):
+    """One per-epoch telemetry event streamed by POST /train/stream."""
+
+    epoch: int
+    loss: Optional[float] = Field(..., description="Mean training MSE; None if non-finite.")
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +129,10 @@ class PredictResponse(BaseModel):
 # Ops
 # ---------------------------------------------------------------------------
 class Health(BaseModel):
+    # "model_loader" is the field name the brief's /healthz check describes;
+    # allow it despite Pydantic reserving the "model_" prefix.
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     model_loader: bool
     supabase: bool

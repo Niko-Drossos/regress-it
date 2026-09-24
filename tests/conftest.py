@@ -20,6 +20,7 @@ def client(monkeypatch):
 
     store = {"datasets": {}, "runs": {}, "predictions": []}
     counters = {"datasets": 0, "runs": 0}
+    created_at = "2026-01-01T00:00:00+00:00"
 
     def insert_dataset(name, slope, intercept, noise, n_points, xs, ys):
         counters["datasets"] += 1
@@ -32,7 +33,7 @@ def client(monkeypatch):
             "n_points": n_points,
             "xs": xs,
             "ys": ys,
-            "created_at": "2026-01-01T00:00:00+00:00",
+            "created_at": created_at,
         }
         store["datasets"][row["id"]] = row
         return row
@@ -40,20 +41,10 @@ def client(monkeypatch):
     def get_dataset(dataset_id):
         return store["datasets"].get(dataset_id)
 
-    def insert_run(dataset_id, lr, batch_size, epochs, mse, mae, r2, weights_json):
+    def insert_run(**fields):
+        # Mirrors db.insert_run's keyword arguments (see api/db.py).
         counters["runs"] += 1
-        row = {
-            "id": counters["runs"],
-            "dataset_id": dataset_id,
-            "lr": lr,
-            "batch_size": batch_size,
-            "epochs": epochs,
-            "mse": mse,
-            "mae": mae,
-            "r2": r2,
-            "weights_json": weights_json,
-            "created_at": "2026-01-01T00:00:00+00:00",
-        }
+        row = {"id": counters["runs"], **fields, "created_at": created_at}
         store["runs"][row["id"]] = row
         return row
 

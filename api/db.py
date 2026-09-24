@@ -89,11 +89,18 @@ def insert_run(
     lr: float,
     batch_size: int,
     epochs: int,
-    mse: float,
-    mae: float,
-    r2: float,
+    status: str,
+    epochs_run: int,
+    patience: Optional[int],
+    min_delta: Optional[float],
+    mse: Optional[float],
+    mae: Optional[float],
+    r2: Optional[float],
     weights_json: dict,
+    loss_history: List[Optional[float]],
 ) -> dict:
+    """Write one training run. Metrics may be None for a diverged run
+    (requires migration 002, which makes mse/mae/r2 nullable)."""
     resp = (
         get_client()
         .table("runs")
@@ -103,10 +110,15 @@ def insert_run(
                 "lr": lr,
                 "batch_size": batch_size,
                 "epochs": epochs,
+                "status": status,
+                "epochs_run": epochs_run,
+                "patience": patience,
+                "min_delta": min_delta,
                 "mse": mse,
                 "mae": mae,
                 "r2": r2,
                 "weights_json": weights_json,
+                "loss_history": loss_history,
             }
         )
         .execute()

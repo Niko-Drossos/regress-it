@@ -10,25 +10,30 @@ concerns across the three clouds.
 """
 from __future__ import annotations
 
+import math
 import os
 import subprocess
+from typing import Iterator
 
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from api import db
+from api.training import TrainResult, fit, iter_fit
 from api.training import predict as run_predict
-from api.training import train_linear_regression
 from shared.data import generate_linear
 from shared.schemas import (
     Dataset,
     DatasetCreate,
+    DatasetWithPoints,
     Health,
     Metrics,
     PredictRequest,
     PredictResponse,
     Run,
+    TrainEpochEvent,
     TrainRequest,
     TrainResponse,
     Version,
@@ -37,7 +42,7 @@ from shared.schemas import (
 app = FastAPI(
     title="Regress-It API",
     description="Linear-regression model service for the three-cloud stack.",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 # The UI lives on a different origin (Streamlit Cloud), so CORS must allow it.
@@ -81,53 +86,123 @@ def create_dataset(req: DatasetCreate) -> Dataset:
     row = db.insert_dataset(
         req.name, req.slope, req.intercept, req.noise, req.n_points, xs, ys
     )
-    return Dataset(**{k: row[k] for k in Dataset.model_fields})
+    return Dataset.model_validate(row)
+
+
+@app.get("/datasets/{dataset_id}", response_model=DatasetWithPoints, tags=["datasets"])
+def get_dataset(dataset_id: int) -> DatasetWithPoints:
+    """Return a dataset with its points (for the UI's fitted-line overlay)."""
+    row = db.get_dataset(dataset_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="dataset_id not found")
+    return DatasetWithPoints.model_validate(row)
 
 
 # ---------------------------------------------------------------------------
 # training
 # ---------------------------------------------------------------------------
-@app.post("/train", response_model=TrainResponse, tags=["training"])
-def train(req: TrainRequest) -> TrainResponse:
-    """Read a dataset from Supabase, train, write the run row, return metrics."""
-    dataset = db.get_dataset(req.dataset_id)
+def _load_dataset_or_404(dataset_id: int) -> dict:
+    dataset = db.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="dataset_id not found")
+    return dataset
 
-    metrics, weights, _loss = train_linear_regression(
-        dataset["xs"],
-        dataset["ys"],
+
+def _fit_kwargs(req: TrainRequest) -> dict:
+    return dict(
         lr=req.lr,
         batch_size=req.batch_size,
         epochs=req.epochs,
         test_size=req.test_size,
+        early_stopping=req.early_stopping,
+        patience=req.patience,
+        min_delta=req.min_delta,
     )
+
+
+def _persist_run(req: TrainRequest, result: TrainResult) -> TrainResponse:
+    """Write the run row to Supabase and build the API response."""
     run = db.insert_run(
         dataset_id=req.dataset_id,
         lr=req.lr,
         batch_size=req.batch_size,
         epochs=req.epochs,
-        mse=metrics["mse"],
-        mae=metrics["mae"],
-        r2=metrics["r2"],
-        weights_json=weights,
+        status=result.status,
+        epochs_run=result.epochs_run,
+        patience=req.patience if req.early_stopping else None,
+        min_delta=req.min_delta if req.early_stopping else None,
+        mse=result.metrics["mse"],
+        mae=result.metrics["mae"],
+        r2=result.metrics["r2"],
+        weights_json=result.weights,
+        loss_history=result.loss_history,
     )
-    return TrainResponse(run_id=run["id"], metrics=Metrics(**metrics), weights=weights)
+    return TrainResponse(
+        run_id=run["id"],
+        status=result.status,
+        epochs_run=result.epochs_run,
+        metrics=Metrics(**result.metrics),
+        weights=result.weights,
+        loss_history=result.loss_history,
+    )
+
+
+@app.post("/train", response_model=TrainResponse, tags=["training"])
+def train(req: TrainRequest) -> TrainResponse:
+    """Read a dataset from Supabase, train, write the run row, return metrics."""
+    dataset = _load_dataset_or_404(req.dataset_id)
+    result = fit(dataset["xs"], dataset["ys"], **_fit_kwargs(req))
+    return _persist_run(req, result)
+
+
+def _sse(event: str, payload: str) -> str:
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+@app.post("/train/stream", tags=["training"])
+def train_stream(req: TrainRequest) -> StreamingResponse:
+    """Same as POST /train, but streams per-epoch loss as Server-Sent Events.
+
+    Event stream:
+        event: epoch  data: TrainEpochEvent   (one per epoch)
+        event: done   data: TrainResponse     (after the run row is written)
+        event: error  data: {"detail": ...}   (if persisting fails)
+    """
+    # Look the dataset up BEFORE streaming starts so a bad id is a real 404.
+    dataset = _load_dataset_or_404(req.dataset_id)
+
+    def events() -> Iterator[str]:
+        for ev in iter_fit(dataset["xs"], dataset["ys"], **_fit_kwargs(req)):
+            if ev["type"] == "epoch":
+                yield _sse("epoch", TrainEpochEvent(epoch=ev["epoch"], loss=ev["loss"]).model_dump_json())
+            else:
+                try:
+                    resp = _persist_run(req, ev["result"])
+                    yield _sse("done", resp.model_dump_json())
+                except Exception as exc:  # noqa: BLE001
+                    yield _sse("error", f'{{"detail": "failed to persist run: {type(exc).__name__}"}}')
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        # Stop proxies (including Render's) from buffering the stream.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/runs/{run_id}", response_model=Run, tags=["training"])
 def get_run(run_id: int) -> Run:
+    """One run from Supabase, including its per-epoch loss history."""
     row = db.get_run(run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="run_id not found")
-    return Run(**{k: row[k] for k in Run.model_fields})
+    return Run.model_validate(row)
 
 
 @app.get("/runs", response_model=list[Run], tags=["training"])
 def list_runs() -> list[Run]:
     """Return the latest 50 runs from Supabase."""
-    rows = db.latest_runs(limit=50)
-    return [Run(**{k: r[k] for k in Run.model_fields}) for r in rows]
+    return [Run.model_validate(r) for r in db.latest_runs(limit=50)]
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +214,19 @@ def predict(req: PredictRequest) -> PredictResponse:
     run = db.get_run(req.run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="run_id not found")
-    yhat = run_predict(run["weights_json"], req.x)
+    weights = run["weights_json"] or {}
+    if (
+        run.get("status") == "diverged"
+        or weights.get("slope") is None
+        or weights.get("intercept") is None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This run diverged; its weights are not a usable model. Pick a converged run.",
+        )
+    yhat = run_predict(weights, req.x)
+    if not math.isfinite(yhat):
+        raise HTTPException(status_code=422, detail="Prediction is not a finite number.")
     db.insert_prediction(req.run_id, req.x, yhat)
     return PredictResponse(run_id=req.run_id, x=req.x, yhat=yhat)
 
@@ -148,12 +235,18 @@ def predict(req: PredictRequest) -> PredictResponse:
 # ops
 # ---------------------------------------------------------------------------
 @app.get("/healthz", response_model=Health, tags=["ops"])
-def healthz() -> Health:
-    """200 when the model loader (torch) and the Supabase client are reachable."""
+def healthz(response: Response) -> Health:
+    """200 when the model loader (torch) and the Supabase client are both
+    reachable; 503 otherwise, so Render's health check reflects real state."""
     supabase_ok = db.ping()
-    model_ok = torch.tensor([1.0]).sum().item() == 1.0
-    status = "ok" if (supabase_ok and model_ok) else "degraded"
-    return Health(status=status, model_loader=model_ok, supabase=supabase_ok)
+    try:
+        model_ok = torch.tensor([1.0]).sum().item() == 1.0
+    except Exception:  # noqa: BLE001
+        model_ok = False
+    healthy = supabase_ok and model_ok
+    if not healthy:
+        response.status_code = 503
+    return Health(status="ok" if healthy else "degraded", model_loader=model_ok, supabase=supabase_ok)
 
 
 @app.get("/version", response_model=Version, tags=["ops"])
