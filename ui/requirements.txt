@@ -3,4 +3,5 @@
 streamlit==1.38.0
 requests==2.32.3
 pandas==2.2.2
-supabase==2.7.4
+# 2.7.4 rejects the new sb_publishable_ keys; 2.16.0 accepts them.
+supabase==2.16.0

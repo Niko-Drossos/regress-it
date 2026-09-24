@@ -3,7 +3,12 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pydantic==2.9.2
 # CPU-only torch keeps the Render build small and free-tier friendly.
-torch==2.4.1
+# Plain "torch==2.4.1" from PyPI is the CUDA build on Linux (+cu121), which
+# pulls several GB of nvidia-* packages. The PyTorch CPU index avoids that.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
 numpy==1.26.4
-supabase==2.7.4
+# 2.7.4 (the template pin) rejects Supabase's new sb_secret_/sb_publishable_
+# keys, which are the only keys new projects get since Nov 2025.
+supabase==2.16.0
 python-dotenv==1.0.1
