@@ -5,3 +5,9 @@ lr: 0.01
 batch_size: 32
 epochs: 100
 test_size: 0.2
+
+# Stopping criterion (see api/training.py)
+early_stopping: true
+patience: 20            # epochs without a relative improvement of min_delta
+min_delta: 0.0001       # relative improvement in training loss that counts
+divergence_factor: 100  # stop if loss > this x the untrained model's loss
