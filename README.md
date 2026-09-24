@@ -1,6 +1,6 @@
 # Regress-It — A Live Linear-Regression Service
 
-**Nicholas Drossos** · CST-435, Section `<FILL IN>` · Grand Canyon University
+**Nicholas Drossos** · Section CST-435-WF100A · Grand Canyon University
 
 | Tier | Platform | URL |
 |------|----------|-----|
