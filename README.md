@@ -6,10 +6,10 @@
 |------|----------|-----|
 | **UI** | Streamlit Community Cloud | `<FILL IN>` |
 | **API** | Render.com | `<FILL IN>` |
-| **Data** | Supabase | `<FILL IN>` |
+| **Data** | Supabase | https://hplsljljuracozwtvupq.supabase.co |
 | **Source** | GitHub | https://github.com/Niko-Drossos/regress-it |
 
-**Supabase project ref:** `<FILL IN>` — migrations in [`db/migrations/`](./db/migrations)
+**Supabase project ref:** `hplsljljuracozwtvupq` — migrations in [`db/migrations/`](./db/migrations)
 ([`001_init.sql`](./db/migrations/001_init.sql),
 [`002_run_telemetry.sql`](./db/migrations/002_run_telemetry.sql))
 
