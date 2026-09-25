@@ -28,9 +28,9 @@ compared later.
 │  Streamlit Cloud     │ ──────────────► │  FastAPI on Render   │ ──────────────► │  Supabase        │
 │  (ui/app.py)         │                 │  (api/main.py)       │   all writes    │  Postgres        │
 │  thin client, no ML  │ ◄── anon key,   │  PyTorch training    │                 │  datasets/runs/  │
-│                      │  read-only ─────┼─────────────────────┼────────────────►│  predictions     │
+│                      │  read-only ─────┼──────────────────────┼────────────────►│  predictions     │
 └──────────────────────┘  SELECT on runs └──────────────────────┘                 │  (RLS on all 3)  │
-                                                                                   └──────────────────┘
+                                                                                  └──────────────────┘
 ```
 
 The Streamlit process contains **no model code and no SQL writes**. Its only
@@ -43,7 +43,7 @@ service key.
 
 ## Engineering report
 
-### Decision 1 — the learning rate
+### Decision 1: the learning rate
 
 Squared error on a linear model is a quadratic bowl of constant curvature, so
 the learning rate has a derivable ceiling. Differentiating twice gives
@@ -66,7 +66,7 @@ case — stable enough to escape the divergence guard, yet thrashing enough that
 the plateau rule fires while the slope is still 2.330: a worse fit, reached
 sooner.
 
-### Decision 2 — the stopping criterion
+### Decision 2: the stopping criterion
 
 Three rules run after every epoch, in order. **Divergence:** the loss or a weight
 is non-finite, or the loss exceeds 100× the untrained model's loss. **Plateau:**
@@ -84,7 +84,7 @@ they reach epoch 34 and land on 2.501, matching the closed-form least-squares
 solution of 2.498. Ten epochs buy the difference between "stopped moving" and
 "arrived."
 
-### Decision 3 — the validation split
+### Decision 3: the validation split
 
 Twenty percent is held out by a seeded permutation before the first epoch; MSE,
 MAE and R² are computed on it once, inside FastAPI, then written to Supabase.
