@@ -4,7 +4,7 @@
 
 | Tier | Platform | URL |
 |------|----------|-----|
-| **UI** | Streamlit Community Cloud | `<FILL IN>` |
+| **UI** | Streamlit Community Cloud | https://regress-it-xacun3ufjzmlqbm2bqygyk.streamlit.app |
 | **API** | Render.com | https://regress-it-api-tvz3.onrender.com |
 | **Data** | Supabase | https://hplsljljuracozwtvupq.supabase.co |
 | **Source** | GitHub | https://github.com/Niko-Drossos/regress-it |
