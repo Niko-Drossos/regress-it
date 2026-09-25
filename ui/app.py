@@ -480,9 +480,14 @@ with history_tab:
             default=shown["id"].tolist()[:3],
             format_func=lambda i: f"Run {i} (lr={df.loc[df['id'] == i, 'lr'].iloc[0]:g})",
         )
+        # loss_history is jsonb, and Postgres stores jsonb numbers as numeric.
+        # A diverged run's loss (6.8e32, say) therefore comes back as a full
+        # decimal with no exponent, which json parses as a Python int too large
+        # for int64. pandas then types the column as object and Arrow refuses to
+        # serialise it, taking the whole tab down. float() keeps it float64.
         curves = pd.DataFrame(
             [
-                {"run": f"Run {r['id']} · lr={r['lr']:g}", "epoch": e + 1, "loss": v}
+                {"run": f"Run {r['id']} · lr={r['lr']:g}", "epoch": e + 1, "loss": float(v)}
                 for r in rows if r["id"] in pick
                 for e, v in enumerate(r.get("loss_history") or [])
                 if v is not None and v > 0
