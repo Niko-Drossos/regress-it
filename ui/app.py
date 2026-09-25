@@ -133,7 +133,8 @@ def loss_chart(losses: list[Optional[float]]) -> alt.Chart:
         alt.Chart(df)
         .mark_line(point=len(df) <= 60)
         .encode(
-            x=alt.X("epoch:Q", title="Epoch"),
+            x=alt.X("epoch:Q", title="Epoch",
+                    axis=alt.Axis(tickMinStep=1, format="d")),
             y=alt.Y("loss:Q", title="Training MSE (log scale)", scale=alt.Scale(type="log")),
             tooltip=["epoch", alt.Tooltip("loss:Q", format=".4g")],
         )
@@ -500,7 +501,8 @@ with history_tab:
                 alt.Chart(curves)
                 .mark_line()
                 .encode(
-                    x=alt.X("epoch:Q", title="Epoch"),
+                    x=alt.X("epoch:Q", title="Epoch",
+                            axis=alt.Axis(tickMinStep=1, format="d")),
                     y=alt.Y("loss:Q", title="Training MSE (log scale)", scale=alt.Scale(type="log")),
                     color=alt.Color("run:N", title=None),
                     tooltip=["run", "epoch", alt.Tooltip("loss:Q", format=".4g")],
